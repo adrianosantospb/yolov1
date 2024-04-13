@@ -7,7 +7,7 @@ class YoloConfig(BaseModel):
     image_size: int = 448
     lr:float = 3e-6
     weight_decay:float = 0.0
-    epochs:int = 300
+    epochs:int = 1000
     iou_threshold:float = 0.3
     threshold:float = 0.5
     momentum:float = 0.9

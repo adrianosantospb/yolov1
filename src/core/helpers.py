@@ -7,6 +7,8 @@ import json
 import numpy as np
 from PIL import Image, ImageOps
 
+from src.core.config import YoloConfig
+
 # Label map
 voc_labels = ('Ambulance', 'Bus', 'Car', 'Motorcycle', 'Truck')
 
@@ -114,56 +116,67 @@ def iou(predictions, targets, box_format="midpoint"):
     return intersection/ (t_box_area + p_box_area - intersection + 1e-6) # adiciona estabilidade numerica...
 
 
-def convert_cellboxes(predictions, S=7):
-    """
-    Converts bounding boxes output from Yolo with
-    an image split size of S into entire image ratios
-    rather than relative to cell ratios. Tried to do this
-    vectorized, but this resulted in quite difficult to read
-    code... Use as a black box? Or implement a more intuitive,
-    using 2 for loops iterating range(S) and convert them one
-    by one, resulting in a slower but more readable implementation.
-    """
+def convert_cellboxes(predictions, conf: YoloConfig, is_target=True, device="cuda"):
 
-    predictions = predictions.to("cpu")
     batch_size = predictions.shape[0]
-    predictions = predictions.reshape(batch_size, 7, 7, 30)
-    bboxes1 = predictions[..., 21:25]
-    bboxes2 = predictions[..., 26:30]
+    
+    if is_target:
+        target_bboxe = predictions[..., conf.C+1:conf.C+5]
+        return target_bboxe
+
+    # for predictions by model
+    pred_1, pred_2 = torch.split(predictions, (conf.C + conf.B * 5), dim=3)
+
+    # get bboxes
+    pred_1_bboxe = pred_1[..., conf.C+1:conf.C+5]
+    pred_2_bboxe = pred_2[..., conf.C+1:conf.C+5]
+
+    # get the scores from the headers 
     scores = torch.cat(
-        (predictions[..., 20].unsqueeze(0), predictions[..., 25].unsqueeze(0)), dim=0
-    )
+                (pred_1[..., conf.C].unsqueeze(0), pred_2[..., conf.C].unsqueeze(0)), dim=0
+            )
+    
+    # get the best predictions
     best_box = scores.argmax(0).unsqueeze(-1)
-    best_boxes = bboxes1 * (1 - best_box) + best_box * bboxes2
-    cell_indices = torch.arange(7).repeat(batch_size, 7, 1).unsqueeze(-1)
-    x = 1 / S * (best_boxes[..., :1] + cell_indices)
-    y = 1 / S * (best_boxes[..., 1:2] + cell_indices.permute(0, 2, 1, 3))
-    w_y = 1 / S * best_boxes[..., 2:4]
+    best_boxes = pred_1_bboxe * (1 - best_box) + best_box * pred_2_bboxe
+    # get all indicies
+    cell_indices = torch.arange(7).repeat(batch_size, 7, 1).unsqueeze(-1).to(device=device)
+    # get coords and create bboxe
+    x = 1 / conf.S * (best_boxes[..., :1] + cell_indices)
+    y = 1 / conf.S * (best_boxes[..., 1:2] + cell_indices.permute(0, 2, 1, 3))
+    w_y = 1 / conf.S * best_boxes[..., 2:4]
+    
     converted_bboxes = torch.cat((x, y, w_y), dim=-1)
-    predicted_class = predictions[..., :20].argmax(-1).unsqueeze(-1)
-    best_confidence = torch.max(predictions[..., 20], predictions[..., 25]).unsqueeze(
-        -1
-    )
-    converted_preds = torch.cat(
-        (predicted_class, best_confidence, converted_bboxes), dim=-1
-    )
+
+    # classes predictions
+    all_classes_predicted = torch.cat((pred_1[..., :conf.C], pred_2[..., :conf.C]), dim=3) 
+    predicted_class = all_classes_predicted[..., :conf.C].argmax(-1).unsqueeze(-1)
+
+    # get the best confidence
+    best_confidence = torch.max(pred_1[..., conf.C], pred_2[..., conf.C]).unsqueeze(
+            -1
+        )
+    
+    # all results
+    converted_preds = torch.cat((predicted_class, best_confidence, converted_bboxes), dim=-1)
 
     return converted_preds
 
 
-def cellboxes_to_boxes(out, S=7):
-    converted_pred = convert_cellboxes(out).reshape(out.shape[0], S * S, -1)
+def cellboxes_to_boxes(out, conf: YoloConfig, is_target=True, device="cuda"):
+    converted_pred = convert_cellboxes(out, conf, is_target, device).reshape(out.shape[0], conf.S * conf.S, -1)
     converted_pred[..., 0] = converted_pred[..., 0].long()
     all_bboxes = []
 
     for ex_idx in range(out.shape[0]):
         bboxes = []
 
-        for bbox_idx in range(S * S):
+        for bbox_idx in range(conf.S * conf.S):
             bboxes.append([x.item() for x in converted_pred[ex_idx, bbox_idx, :]])
         all_bboxes.append(bboxes)
 
     return all_bboxes
+
 
 '''
 Non max suppression
@@ -389,80 +402,3 @@ def letterbox(image, desired_size):
     padding = (delta_w // 2, delta_h // 2, delta_w - (delta_w // 2), delta_h - (delta_h // 2))
 
     return ImageOps.expand(im, padding, fill='black')
-
-
-
-def create_data_lists(voc07_path, voc12_path, output_folder):
-    """
-    Create lists of images, the bounding boxes and labels of the objects in these images, and save these to file.
-
-    :param voc07_path: path to the 'VOC2007' folder
-    :param voc12_path: path to the 'VOC2012' folder
-    :param output_folder: folder where the JSONs must be saved
-    """
-    voc07_path = os.path.abspath(voc07_path)
-    voc12_path = os.path.abspath(voc12_path)
-
-    train_images = list()
-    train_objects = list()
-    n_objects = 0
-
-    # Training data
-    for path in [voc07_path, voc12_path]:
-
-        # Find IDs of images in training data
-        with open(os.path.join(path, 'ImageSets/Main/trainval.txt')) as f:
-            ids = f.read().splitlines()
-
-        for id in ids:
-            # Parse annotation's XML file
-            objects = parse_annotation(os.path.join(path, 'Annotations', id + '.xml'))            
-
-            if not objects:
-                continue
-
-            n_objects += len(objects)
-            train_objects.append(objects)
-            train_images.append(os.path.join(path, 'JPEGImages', id + '.jpg'))
-
-    assert len(train_objects) == len(train_images)
-
-    # Save to file
-    with open(os.path.join(output_folder, 'TRAIN_images.json'), 'w') as j:
-        json.dump(train_images, j)
-    with open(os.path.join(output_folder, 'TRAIN_objects.json'), 'w') as j:
-        json.dump(train_objects, j)
-    with open(os.path.join(output_folder, 'label_map.json'), 'w') as j:
-        json.dump(label_map, j)  # save label map too
-
-    print('\nThere are %d training images containing a total of %d objects. Files have been saved to %s.' % (
-        len(train_images), n_objects, os.path.abspath(output_folder)))
-
-    # Test data
-    test_images = list()
-    test_objects = list()
-    n_objects = 0
-
-    # Find IDs of images in the test data
-    with open(os.path.join(voc07_path, 'ImageSets/Main/test.txt')) as f:
-        ids = f.read().splitlines()
-
-    for id in ids:
-        # Parse annotation's XML file
-        objects = parse_annotation(os.path.join(voc07_path, 'Annotations', id + '.xml'))
-        if len(objects) == 0:
-            continue
-        test_objects.append(objects)
-        n_objects += len(objects)
-        test_images.append(os.path.join(voc07_path, 'JPEGImages', id + '.jpg'))
-
-    assert len(test_objects) == len(test_images)
-
-    # Save to file
-    with open(os.path.join(output_folder, 'TEST_images.json'), 'w') as j:
-        json.dump(test_images, j)
-    with open(os.path.join(output_folder, 'TEST_objects.json'), 'w') as j:
-        json.dump(test_objects, j)
-
-    print('\nThere are %d test images containing a total of %d objects. Files have been saved to %s.' % (
-        len(test_images), n_objects, os.path.abspath(output_folder)))

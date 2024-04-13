@@ -1,5 +1,12 @@
-# yolov1
+# YOLO V1
+##### Adriano A. Santos, PhD
+
 You Only Look Once: Unified, Real-Time Object Detection
 
-https://github.com/BestAnHongjun/YOLOv1-pytorch/blob/dev/yolo/utils/dataset/tools/voc_eval.py#L21
-https://www.youtube.com/watch?v=n9_XyCGr-MI
+## Pyramid Scene Parsing Network
+
+by Joseph Redmon, Santosh Divvala, Ross Girshick, Ali Farhadi. https://arxiv.org/abs/1506.02640
+
+## Dataset
+ 
+ Cars Detection: https://www.kaggle.com/datasets/abdallahwagih/cars-detection

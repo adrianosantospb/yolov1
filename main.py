@@ -64,7 +64,8 @@ from src.core.helpers import cellboxes_to_boxes, mAp, non_max_suppression
 
 def train(train_loader, model, criterion, optimizer, device):
     torch.cuda.empty_cache()
-
+    
+    model.train()
     total_loss = 0.0
     
     for _ , (image, labels) in tqdm(enumerate(train_loader), total=len(train_loader)):
@@ -106,8 +107,8 @@ def evaluating(model, dataloader, criterion, device):
             y_preds = model(inputs)
 
             batch_size = inputs.shape[0]
-            true_bboxes = cellboxes_to_boxes(labels)
-            bboxes = cellboxes_to_boxes(y_preds)
+            true_bboxes = cellboxes_to_boxes(labels, config)
+            bboxes = cellboxes_to_boxes(y_preds, config, False, device)
 
             for idx in range(batch_size):
                 nms_boxes = non_max_suppression(
@@ -132,32 +133,39 @@ def evaluating(model, dataloader, criterion, device):
             total_loss += loss.item()
            
 
-    metric_object = mAp(all_pred_boxes, all_true_boxes,box_format="midpoint")
-
+    evaluation_metric = mAp(all_pred_boxes, all_true_boxes,box_format="midpoint")
     evaluation_loss = total_loss / len(dataloader)
-    evaluation_metric = metric_object
+
     return evaluation_loss, evaluation_metric
 
-try:
-    for epoch in range(config.epochs):
 
-        print("\nEpoch {}".format(1 + epoch))
-        
-        train_mean_loss = train(train_loader=train_dataloader,
-                model=model,
-                criterion=criterion,
-                optimizer=optimizer, device=device)
-        
-        print("Train mean loss: {}".format(train_mean_loss))
-        
-        #evaluation_loss, evaluation_metric = evaluating(model=model, dataloader=val_dataloader, criterion=criterion, device=device)
-        #print("Val mean loss: {} mAp: {}".format(evaluation_loss, evaluation_metric))
- 
+if __name__ == "__main__":    
+    try:
+        best_metric = 0
+
+        for epoch in range(config.epochs):
+
+            print("\nEpoch {}".format(1 + epoch))
+            
+            train_mean_loss = train(train_loader=train_dataloader,
+                    model=model,
+                    criterion=criterion,
+                    optimizer=optimizer, device=device)
+            
+            print("Train mean loss: {}".format(train_mean_loss))
+            
+            evaluation_loss, evaluation_metric = evaluating(model=model, dataloader=val_dataloader, criterion=criterion, device=device)
+            print("Val mean loss: {} mAp: {}".format(evaluation_loss, evaluation_metric))
+
+            if best_metric < evaluation_metric:
+                torch.save(model.state_dict(), "./weights/best.pt")
+                best_metric = evaluation_metric
+
         torch.cuda.empty_cache()
-        
-except Exception as ex:
-    print(ex)
+            
+    except Exception as ex:
+        print(ex)
 
-del model
-torch.cuda.empty_cache()
-gc.collect()
+    del model
+    torch.cuda.empty_cache()
+    gc.collect()
