@@ -1,0 +1,34 @@
+# anchors
+anchors:
+  - [12,16, 19,36, 40,28]  # P3/8
+  - [36,75, 76,55, 72,146]  # P4/16
+
+# yolov1 backbone
+backbone:
+  # [from, number, module, args (kernel size, out channels, stride, padding)]
+  [
+    [-1, 1, Conv, [7, 64, 2, 3]], # CNNBlocks
+    [-1, 1, MP, []], # MaxPool
+    [-1, 1, Conv, [3, 192, 1, 1]],
+    [-1, 1, MP, []],
+    [-1, 1, Conv, [1, 128, 1, 0]],
+    [-1, 1, Conv, [3, 256, 1, 1]],
+    [-1, 1, Conv, [1, 256, 1, 0]],
+    [-1, 1, Conv, [3, 512, 1, 1]],
+    [-1, 1, MP, []],
+    [-1, 4, RepConv, [[1, 256, 1, 0], [3, 512, 1, 1]]], # repeating CNNBlocks
+    [-1, 1, Conv, [1, 512, 1, 0]],
+    [-1, 1, Conv, [3, 1024, 1, 1]],
+    [-1, 1, MP, []],
+    [-1, 2, RepConv, [[1, 512, 1, 0], [3, 1024, 1, 1]]],
+    [-1, 1, Conv, [3, 1024, 1, 1]],
+    [-1, 1, Conv, [3, 1024, 2, 1]],
+    [-1, 1, Conv, [3, 1024, 1, 1]],
+    [-1, 1, Conv, [3, 1024, 1, 1]],
+  ]
+
+# yolov1 header
+header:
+  [
+   [-1, 1, YoloV1],
+  ]

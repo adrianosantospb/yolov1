@@ -1,0 +1,12 @@
+pandas
+numpy
+pyyaml
+torchsummary
+opencv-python
+opencv-contrib-python
+pillow
+torchvision
+matplotlib
+tqdm
+albumentations
+pydantic
