@@ -31,11 +31,11 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 train_transforms = Compose([transforms.Resize((448,448)), transforms.ToTensor()])
 val_test_transforms = Compose([transforms.Resize((448,448)), transforms.ToTensor()])
 
-train_images_path = "/home/adriano/Documents/datasets/Cars Detection/train/images"
-train_labels_path = "/home/adriano/Documents/datasets/Cars Detection/train/labels"
+train_images_path = "~/Documents/datasets/Cars Detection/train/images"
+train_labels_path = "~/Documents/datasets/Cars Detection/train/labels"
 
-val_images_path = "/home/adriano/Documents/datasets/Cars Detection/valid/images"
-val_labels_path = "/home/adriano/Documents/datasets/Cars Detection/valid/labels"
+val_images_path = "~/Documents/datasets/Cars Detection/valid/images"
+val_labels_path = "~/Documents/datasets/Cars Detection/valid/labels"
 
 num_worker = 4 * int(torch.cuda.device_count())
 batch_size = 8
