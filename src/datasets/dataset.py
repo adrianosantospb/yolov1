@@ -13,8 +13,6 @@ class CarDataset(Dataset):
         self.transform = transform
         self.cache_dir = 'cache'
 
-        '''
-        
         # Criar diretório de cache se não existir
         if not os.path.exists(self.cache_dir):
             os.makedirs(self.cache_dir)
@@ -32,13 +30,13 @@ class CarDataset(Dataset):
             self.images = np.load(self.cache_images_path, allow_pickle=True)
             self.labels = np.load(self.cache_labels_path, allow_pickle=True)
         else:
-        '''
-        self.images = [filepath for filepath in glob.glob(os.path.join(images_files_path, '*'))]
-        self.labels = [filepath for filepath in glob.glob(os.path.join(labels_files_path, '*'))]
+
+            self.images = [filepath for filepath in glob.glob(os.path.join(images_files_path, '*'))]
+            self.labels = [filepath for filepath in glob.glob(os.path.join(labels_files_path, '*'))]
         
-        # Salvar em cache
-        #np.save(self.cache_images_path, self.images)
-        #np.save(self.cache_labels_path, self.labels)
+            # Salvar em cache
+            np.save(self.cache_images_path, self.images)
+            np.save(self.cache_labels_path, self.labels)
 
         assert len(self.labels) == len(self.images)
 

@@ -11,6 +11,8 @@ from src.models.yolo import YoloV1
 from src.core.config import YoloConfig
 import torch.optim as optim
 from src.models.loss import YoloLoss
+from torch.optim.lr_scheduler import OneCycleLR
+import torch.nn as nn
 
 import gc
 import logging
@@ -53,8 +55,8 @@ model.compile()
 
 criterion = YoloLoss()
 optimizer = optim.Adam(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
-#scheduler = OneCycleLR(optimizer, max_lr=config.lr, epochs = config.epochs, steps_per_epoch = 2*(len(train_dataloader)), 
-#                        pct_start=0.3, div_factor=100, anneal_strategy='cos')
+scheduler = OneCycleLR(optimizer, max_lr=config.lr, epochs = config.epochs, steps_per_epoch = 2*(len(train_dataloader)), 
+                        pct_start=0.3, div_factor=10, anneal_strategy='cos')
 
 # 3 - training
 from src.core.helpers import cellboxes_to_boxes, mAp, non_max_suppression
@@ -78,12 +80,12 @@ def train(train_loader, model, criterion, optimizer, device):
         loss.backward()
 
         # Clip gradient
-        #nn.utils.clip_grad_norm_(model.parameters(), max_norm=5)
+        nn.utils.clip_grad_norm_(model.parameters(), max_norm=5)
 
         optimizer.step()
 
         # adjust learning rate
-        #scheduler.step()
+        scheduler.step()
 
     return total_loss / len(train_loader)
 
