@@ -46,7 +46,7 @@ train_dataloader = torch.utils.data.DataLoader(train_dataset, shuffle=True, batc
 val_dataset = CarDataset(val_images_path, val_labels_path, transform=val_test_transforms, cache_mode="val")
 val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, drop_last=True, num_workers=num_worker, pin_memory=True)
 
-print(len(train_dataset), len(val_dataset))
+print("Training datset {} Val dataset {} ".format(len(train_dataset), len(val_dataset)))
 
 # 2 - Model
 model = YoloV1()
@@ -126,7 +126,6 @@ def evaluating(model, dataloader, criterion, device):
                         all_true_boxes.append([train_idx] + box)
 
             train_idx += 1
-
 
             # calculate loss
             loss = criterion(y_preds, labels)
