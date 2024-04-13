@@ -148,8 +148,8 @@ try:
         
         print("Train mean loss: {}".format(train_mean_loss))
         
-        evaluation_loss, evaluation_metric = evaluating(model=model, dataloader=val_dataloader, criterion=criterion, device=device)
-        print("Val mean loss: {} mAp: {}".format(evaluation_loss, evaluation_metric))
+        #evaluation_loss, evaluation_metric = evaluating(model=model, dataloader=val_dataloader, criterion=criterion, device=device)
+        #print("Val mean loss: {} mAp: {}".format(evaluation_loss, evaluation_metric))
  
         torch.cuda.empty_cache()
         

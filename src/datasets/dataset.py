@@ -13,6 +13,8 @@ class CarDataset(Dataset):
         self.transform = transform
         self.cache_dir = 'cache'
 
+        '''
+        
         # Criar diretório de cache se não existir
         if not os.path.exists(self.cache_dir):
             os.makedirs(self.cache_dir)
@@ -30,12 +32,13 @@ class CarDataset(Dataset):
             self.images = np.load(self.cache_images_path, allow_pickle=True)
             self.labels = np.load(self.cache_labels_path, allow_pickle=True)
         else:
-            self.images = [os.path.join(images_files_path, filepath) for filepath in glob.glob(images_files_path)]
-            self.labels = [os.path.join(labels_files_path, filepath) for filepath in glob.glob(labels_files_path)]
-            
-            # Salvar em cache
-            np.save(self.cache_images_path, self.images)
-            np.save(self.cache_labels_path, self.labels)
+        '''
+        self.images = [filepath for filepath in glob.glob(os.path.join(images_files_path, '*'))]
+        self.labels = [filepath for filepath in glob.glob(os.path.join(labels_files_path, '*'))]
+        
+        # Salvar em cache
+        #np.save(self.cache_images_path, self.images)
+        #np.save(self.cache_labels_path, self.labels)
 
         assert len(self.labels) == len(self.images)
 
@@ -43,6 +46,7 @@ class CarDataset(Dataset):
         return len(self.images)
 
     def __getitem__(self, idx):
+
         # Carregar imagem
         image = Image.open(self.images[idx])
         W, H = image.size
@@ -66,9 +70,7 @@ class CarDataset(Dataset):
         # Converter para tensores do PyTorch
         image = torch.FloatTensor(image)
         boxes = torch.FloatTensor(boxes)
-
-        print(boxes)
-
+        
         # Criar matriz de rótulos
         label_matrix = torch.zeros((self.conf.S, self.conf.S, self.conf.C + 5 * self.conf.B))
 
@@ -78,9 +80,23 @@ class CarDataset(Dataset):
             cls = int(classes[idx])
 
             # Correspondências da grade
-            i, j = int(self.conf.S * y), int(self.conf.S * x)
-            y_cel, x_cel =  self.conf.S * y - i, self.conf.S * x -j
-            h_cel, w_cel = h + self.conf.S, w + self.conf.S
+            # Calcular j apenas se x estiver dentro dos limites [0, 1)
+            if 0 <= x < 1:
+                j = int(self.conf.S * x)
+            else:
+                # Se x estiver fora dos limites, defina j para o valor mais próximo dos limites
+                j = min(max(int(self.conf.S * x), 0), self.conf.S - 1)
+            
+            # Calcular i apenas se y estiver dentro dos limites [0, 1)
+            if 0 <= y < 1:
+                i = int(self.conf.S * y)
+            else:
+                # Se y estiver fora dos limites, defina i para o valor mais próximo dos limites
+                i = min(max(int(self.conf.S * y), 0), self.conf.S - 1)
+
+            # Calcular coordenadas normalizadas dentro da célula
+            y_cel, x_cel = self.conf.S * y - i, self.conf.S * x - j
+            h_cel, w_cel = h / self.conf.S, w / self.conf.S
 
             # Preencher a matriz de rótulos
             label_matrix[i, j, self.conf.C] = 1
@@ -88,6 +104,7 @@ class CarDataset(Dataset):
             label_matrix[i, j, cls] = 1
 
         return image, label_matrix
+
 
 class Compose(object):
     def __init__(self, transforms):

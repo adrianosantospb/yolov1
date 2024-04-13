@@ -2,6 +2,9 @@ from src.core.config import YoloConfig
 from src.datasets.dataset import CarDataset
 import torchvision.transforms as transforms
 
+import random
+
+
 conf = YoloConfig()
 
 train_images_path = "/home/adriano/Documents/datasets/Cars Detection/train/images"
@@ -19,5 +22,7 @@ class Compose(object):
 transform = Compose([transforms.Resize((448,448)), transforms.ToTensor()])
 
 train_dataset = CarDataset(train_images_path, val_images_path, transform=transform)
-image, matrix = train_dataset[0] 
-#print(matrix)
+idx = random.randint(0, len(train_dataset))
+
+image, matrix = train_dataset[idx] 
+print(matrix)
