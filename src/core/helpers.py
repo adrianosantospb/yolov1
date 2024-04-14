@@ -1,11 +1,8 @@
-from typing import Counter
 import torch
 import xml.etree.ElementTree as ET
-import cv2
-import os
-import json
 import numpy as np
 from PIL import Image, ImageOps
+from collections import Counter
 
 from src.core.config import YoloConfig
 
@@ -70,58 +67,19 @@ def from_xywh_to_x1y1x2y2(bboxes, H, W):
     
     return (x1, y1, x2, y2)
 
-def iou(predictions, targets, box_format="midpoint"):
-    
-    if box_format == "midpoint":
-        # obtem os itens das bboxes preditas
-        p_box_x1 = predictions[..., 0:1] - predictions[..., 2:3] / 2 # x1
-        p_box_y1 = predictions[..., 1:2] - predictions[..., 3:4] / 2 # y1
-        p_box_x2 = predictions[..., 0:1] + predictions[..., 2:3] / 2 # x2
-        p_box_y2 = predictions[..., 1:2] + predictions[..., 3:4] / 2 # y2
-
-        # obtem os itens das bboxes preditas
-        t_box_x1 = targets[..., 0:1] - targets[..., 2:3] / 2 # x1
-        t_box_y1 = targets[..., 1:2] - targets[..., 3:4] / 2 # y1
-        t_box_x2 = targets[..., 0:1] + targets[..., 2:3] / 2 # x2
-        t_box_y2 = targets[..., 1:2] + targets[..., 3:4] / 2 # y2 
-        
-    elif box_format == "corners":
-        # obtem os itens das bboxes preditas
-        p_box_x1 = predictions[..., 0:1] # x1
-        p_box_y1 = predictions[..., 1:2] # y1
-        p_box_x2 = predictions[..., 2:3] # x2
-        p_box_y2 = predictions[..., 3:4] # y2
-
-        # obtem os itens das bboxes preditas
-        t_box_x1 = targets[..., 0:1] # x1
-        t_box_y1 = targets[..., 1:2] # y1
-        t_box_x2 = targets[..., 2:3] # x2
-        t_box_y2 = targets[..., 3:4] # y2
-
-    # obtem os maximos valores superiores
-    x1 = torch.max(p_box_x1, t_box_x1)
-    y1 = torch.max(p_box_y1, t_box_y1)
-
-    # obtem os minimos valores inferiores
-    x2 = torch.min(p_box_x2, t_box_x2)
-    y2 = torch.min(p_box_y2, t_box_y2)
-
-    # clamp eh uma funcao utilizada para caso nao haja intercesao o valor atribuido sera 0
-    intersection = (x2 - x1).clamp(0) * (y2 - y1).clamp(0)
-
-    # Calculando a area dos bbox. Utilizaremos a funcao abs para garantir que o valor seja positivo.
-    t_box_area = abs((t_box_x2 - t_box_x1) * (t_box_y2 - t_box_y1))
-    p_box_area = abs((p_box_x2 - p_box_x1) * (p_box_y2 - p_box_y1))
-
-    return intersection/ (t_box_area + p_box_area - intersection + 1e-6) # adiciona estabilidade numerica...
-
-
 def convert_cellboxes(predictions, conf: YoloConfig, is_target=True, device="cuda"):
 
     batch_size = predictions.shape[0]
     
     if is_target:
-        target_bboxe = predictions[..., conf.C+1:conf.C+5]
+        _, class_indices = torch.max(predictions[..., :conf.C], dim=-1)
+        # Extrair a confiança
+        confidence = predictions[..., conf.C]
+        # Extrair as coordenadas do bounding box
+        bbox_coordinates = predictions[..., conf.C + 1: conf.C + 5]
+        # Concatenar as informações extraídas em um tensor de saída
+        target_bboxe = torch.cat((class_indices.unsqueeze(-1), confidence.unsqueeze(-1), bbox_coordinates), dim=-1)
+        
         return target_bboxe
 
     # for predictions by model
@@ -159,7 +117,7 @@ def convert_cellboxes(predictions, conf: YoloConfig, is_target=True, device="cud
     
     # all results
     converted_preds = torch.cat((predicted_class, best_confidence, converted_bboxes), dim=-1)
-
+    
     return converted_preds
 
 
@@ -167,7 +125,6 @@ def cellboxes_to_boxes(out, conf: YoloConfig, is_target=True, device="cuda"):
     converted_pred = convert_cellboxes(out, conf, is_target, device).reshape(out.shape[0], conf.S * conf.S, -1)
     converted_pred[..., 0] = converted_pred[..., 0].long()
     all_bboxes = []
-
     for ex_idx in range(out.shape[0]):
         bboxes = []
 
@@ -177,16 +134,8 @@ def cellboxes_to_boxes(out, conf: YoloConfig, is_target=True, device="cuda"):
 
     return all_bboxes
 
-
 '''
 Non max suppression
-
-predictions = list of bbox. Ex: ([[1 , 0.9, x1, y1, x2, y2], [1 , 0.3, x1, y1, x2, y2],[1 , 0.61, x1, y1, x2, y2]])
-                classe, prob, bbox
-iou_threshold = filtro
-box_format = formato do bbox midpoint ou corners
-
-https://towardsdatascience.com/non-maximum-suppression-nms-93ce178e177c
 
 '''
 def non_max_suppression(bboxes, iou_threshold, threshold, box_format="midpoint"):
@@ -195,7 +144,7 @@ def non_max_suppression(bboxes, iou_threshold, threshold, box_format="midpoint")
 
     Parameters:
         bboxes (list): list of lists containing all bboxes with each bboxes
-        specified as [class_pred, prob_score, x1, y1, x2, y2]
+        specified as [class_pred, prob_score, x, y, w, h]
         iou_threshold (float): threshold where predicted bboxes is correct
         threshold (float): threshold to remove predicted bboxes (independent of IoU) 
         box_format (str): "midpoint" or "corners" used to specify bboxes
@@ -233,112 +182,157 @@ def non_max_suppression(bboxes, iou_threshold, threshold, box_format="midpoint")
 mAp - Mean Average Precision (mAP) 
 https://www.youtube.com/watch?v=FppOzcDvaDI&list=PLhhyoLH6Ijfw0TpCTVTNk42NN08H6UvNq&index=4
 '''
-
-def mAp(
-    pred_boxes, true_boxes, iou_threshold=0.5, box_format="midpoint", num_classes=20
-):
+def iou(predictions, targets, box_format="midpoint"):
     """
-    Calculates mean average precision 
+    Calculate Intersection over Union (IoU) for predicted and target bounding boxes.
 
-    Parameters:
-        pred_boxes (list): list of lists containing all bboxes with each bboxes
-        specified as [train_idx, class_prediction, prob_score, x1, y1, x2, y2]
-        true_boxes (list): Similar as pred_boxes except all the correct ones 
-        iou_threshold (float): threshold where predicted bboxes is correct
-        box_format (str): "midpoint" or "corners" used to specify bboxes
-        num_classes (int): number of classes
+    Args:
+        predictions (tensor): Predicted bounding boxes, shape (N, 4), where N is the number of boxes.
+        targets (tensor): Target bounding boxes, shape (N, 4).
+        box_format (str): Format of the bounding boxes, either 'midpoint' or 'corners'.
 
     Returns:
-        float: mAP value across all classes given a specific IoU threshold 
+        tensor: IoU for each pair of predicted and target bounding boxes, shape (N,).
     """
+    
+    if box_format == "midpoint":
+        # Get coordinates of the predicted bounding boxes
+        p_x1 = predictions[..., 0:1] - predictions[..., 2:3] / 2  # left
+        p_y1 = predictions[..., 1:2] - predictions[..., 3:4] / 2  # top
+        p_x2 = predictions[..., 0:1] + predictions[..., 2:3] / 2  # right
+        p_y2 = predictions[..., 1:2] + predictions[..., 3:4] / 2  # bottom
+
+        # Get coordinates of the target bounding boxes
+        t_x1 = targets[..., 0:1] - targets[..., 2:3] / 2  # left
+        t_y1 = targets[..., 1:2] - targets[..., 3:4] / 2  # top
+        t_x2 = targets[..., 0:1] + targets[..., 2:3] / 2  # right
+        t_y2 = targets[..., 1:2] + targets[..., 3:4] / 2  # bottom
+        
+    elif box_format == "corners":
+        # Get coordinates of the predicted bounding boxes
+        p_x1, p_y1, p_x2, p_y2 = predictions[..., 0:1], predictions[..., 1:2], predictions[..., 2:3], predictions[..., 3:4]
+
+        # Get coordinates of the target bounding boxes
+        t_x1, t_y1, t_x2, t_y2 = targets[..., 0:1], targets[..., 1:2], targets[..., 2:3], targets[..., 3:4]
+
+    # Get intersection coordinates
+    inter_x1 = torch.max(p_x1, t_x1)
+    inter_y1 = torch.max(p_y1, t_y1)
+    inter_x2 = torch.min(p_x2, t_x2)
+    inter_y2 = torch.min(p_y2, t_y2)
+
+    # Compute intersection area
+    inter_area = torch.clamp(inter_x2 - inter_x1, min=0) * torch.clamp(inter_y2 - inter_y1, min=0)
+
+    # Compute area of prediction and target boxes
+    p_area = (p_x2 - p_x1) * (p_y2 - p_y1)
+    t_area = (t_x2 - t_x1) * (t_y2 - t_y1)
+
+    # Compute union area
+    union_area = p_area + t_area - inter_area
+
+    # Add epsilon for numerical stability
+    epsilon = 1e-6
+
+    # Compute IoU
+    iou = inter_area / (union_area + epsilon)
+
+    return iou
+
+def mAP(predictions, targets, iou_threshold=0.5, box_format="midpoint", num_classes=5):
+
+    assert type(predictions) == list
+    assert type(targets) == list
 
     # list storing all AP for respective classes
     average_precisions = []
 
-    # used for numerical stability later on
-    epsilon = 1e-6
+    epsilon = 1e-6 #https://nhigham.com/2020/08/04/what-is-numerical-stability/
 
-    for c in range(num_classes):
+    for c in range(num_classes): # varre todas as possiveis classes
         detections = []
         ground_truths = []
 
-        # Go through all predictions and targets,
-        # and only add the ones that belong to the
-        # current class c
-        for detection in pred_boxes:
-            if detection[1] == c:
-                detections.append(detection)
+        for det in predictions: # agrupa as deteccoes por classe
+            if det[1] == c:
+                detections.append(det)
+        
+        for gt in targets: # agrupa as anotacoes reais por classe
+            if gt[1] == c:
+                ground_truths.append(gt)
+        
+        # Ex: {classe_a: n, classe_b: m, ...}
+        class_dict = Counter([gt[0] for gt in ground_truths])
 
-        for true_box in true_boxes:
-            if true_box[1] == c:
-                ground_truths.append(true_box)
-
-        # find the amount of bboxes for each training example
-        # Counter here finds how many ground truth bboxes we get
-        # for each training example, so let's say img 0 has 3,
-        # img 1 has 5 then we will obtain a dictionary with:
-        # amount_bboxes = {0:3, 1:5}
-        amount_bboxes = Counter([gt[0] for gt in ground_truths])
-
-        # We then go through each key, val in this dictionary
-        # and convert to the following (w.r.t same example):
-        # ammount_bboxes = {0:torch.tensor[0,0,0], 1:torch.tensor[0,0,0,0,0]}
-        for key, val in amount_bboxes.items():
-            amount_bboxes[key] = torch.zeros(val)
-
-        # sort by box probabilities which is index 2
-        detections.sort(key=lambda x: x[2], reverse=True)
+        # Ex: {classe_a: torch.tensor([0,0,0]), classe_b: torch.tensor([0,0,0,0,0]), ...}
+        for i, item in class_dict.items():
+            class_dict[i] = torch.zeros(item)
+        
+        detections.sort(key=lambda x:x[2], reverse=True)
         TP = torch.zeros((len(detections)))
         FP = torch.zeros((len(detections)))
         total_true_bboxes = len(ground_truths)
-        
+
         # If none exists for this class then we can safely skip
         if total_true_bboxes == 0:
             continue
-
-        for detection_idx, detection in enumerate(detections):
-            # Only take out the ground_truths that have the same
-            # training idx as detection
-            ground_truth_img = [
-                bbox for bbox in ground_truths if bbox[0] == detection[0]
-            ]
+        
+        if len(detections) == 0:
+            continue
+        
+        for det_idx, det in enumerate(detections):
+            # obtem apenas os ground_truths que correspondem a classe especifica detectada
+            ground_truths_img = [bbox for bbox in ground_truths if bbox[0]==det[0]]
 
             best_iou = 0
 
-            for idx, gt in enumerate(ground_truth_img):
-                iou_value = iou(
-                    torch.tensor(detection[3:]),
-                    torch.tensor(gt[3:]),
-                    box_format=box_format,
-                )
-
-                if iou_value > best_iou:
-                    best_iou = iou_value
+            for idx, gt in enumerate(ground_truths_img):
+                _iou = iou(torch.tensor(det[3:]), torch.tensor(gt[3:]), box_format=box_format)
+                
+                if _iou > best_iou:
+                    best_iou = _iou
                     best_gt_idx = idx
-
+            
             if best_iou > iou_threshold:
                 # only detect ground truth detection once
-                if amount_bboxes[detection[0]][best_gt_idx] == 0:
+                if class_dict[det[0]][best_gt_idx] == 0:
                     # true positive and add this bounding box to seen
-                    TP[detection_idx] = 1
-                    amount_bboxes[detection[0]][best_gt_idx] = 1
+                    TP[det_idx] = 1
+                    class_dict[det[0]][best_gt_idx] = 1
                 else:
-                    FP[detection_idx] = 1
+                    FP[det_idx] = 1
 
             # if IOU is lower then the detection is a false positive
             else:
-                FP[detection_idx] = 1
+                FP[det_idx] = 1
 
         TP_cumsum = torch.cumsum(TP, dim=0)
         FP_cumsum = torch.cumsum(FP, dim=0)
         recalls = TP_cumsum / (total_true_bboxes + epsilon)
         precisions = torch.divide(TP_cumsum, (TP_cumsum + FP_cumsum + epsilon))
-        precisions = torch.cat((torch.tensor([1]), precisions))
-        recalls = torch.cat((torch.tensor([0]), recalls))
-        # torch.trapz for numerical integration
-        average_precisions.append(torch.trapz(precisions, recalls))
+        
+        if recalls.numel() == 0 or precisions.numel() == 0:
+            # Retorna valores padrão se os tensores estiverem vazios
+            average_precisions.append(torch.tensor(0))
+        else:
+            precisions = torch.cat((torch.tensor([1]), precisions))
+            recalls = torch.cat((torch.tensor([0]), recalls))
+            # torch.trapz for numerical integration
+            average_precisions.append(torch.trapz(precisions, recalls))
 
-    return sum(average_precisions) / len(average_precisions)
+    
+    # Verifica se houve detecções positivas em todas as classes para evitar divisão por zero
+    if len(average_precisions) > 0:
+        recall = sum(recalls) / len(recalls) if recalls.numel() > 0 else 0.001
+        precision = sum(precisions) / len(precisions) if precisions.numel() > 0 else 0.001
+        mAP_value = sum(average_precisions) / len(average_precisions)
+    else:
+        recall = torch.tensor(0)
+        precision = torch.tensor(0)
+        mAP_value = torch.tensor(0)
+    
+    return mAP_value, recall, precision
+
 
 def resize_bboxes(bboxes, old_size, new_size):
     """
